@@ -9,7 +9,7 @@ pipeline {
         TARGET_ENV = ""
         DOCKER_IMAGE_TAG = ""
         DOCKER_COMPOSE_FILE = ""
-        # TARGET_PORT = "" // Not needed for Nginx proxy setup anymore
+        TARGET_PORT = "" // Not needed for Nginx proxy setup anymore
         CONTAINER_NAME = ""
         REMOTE_APP_DIR = "/home/vagrant/angular-app"
         VM_IP = "192.168.56.11" // Your VM's IP address
