@@ -1,6 +1,6 @@
 // src/main.ts
 import { bootstrapApplication } from "@angular/platform-browser";
-import { App as AppComponent } from "./app/app";
+import { AppComponent } from "./app/app";
 import { provideHttpClient } from "@angular/common/http"; // Import provideHttpClient
 import { APP_INITIALIZER } from "@angular/core";
 import { ConfigService } from "./app/config.service"; // Import your ConfigService
