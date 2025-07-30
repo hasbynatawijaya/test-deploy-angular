@@ -35,7 +35,7 @@ pipeline {
             }
         }
         stage('Checkout') {
-            steps { git 'https://github.com/YOUR_GITHUB_USERNAME/angular-multi-env-app.git' }
+            steps { git 'https://github.com/YOUR_GITHUB_USERNAME/test-deploy-angular.git' }
         }
         stage('Build Angular App') {
             when { expression { return env.TARGET_ENV != 'feature' } }
@@ -71,26 +71,33 @@ pipeline {
 
                     echo "Attempting SSH connection using credential ID: ${env.VM_SSH_CREDENTIAL_ID}"
 
-                    withCredentials([sshUserPrivateKey(credentialsId: env.VM_SSH_CREDENTIAL_ID, keyFileVariable: 'identityFile', usernameVariable: 'userName')]) {
-                        // Add debug print to see if identityFile is populated
-                        echo "Resolved identityFile path: ${identityFile}"
-
+                   withCredentials([sshUserPrivateKey(credentialsId: env.VM_SSH_CREDENTIAL_ID, keyFileVariable: 'identityFile', usernameVariable: 'userName')]) {
                         remote.identityFile = identityFile
                         remote.user = userName
 
-                        echo "Attempting simple SSH command to ${remote.host} as ${remote.user}"
-                        try {
-                            // Execute a very simple command to test the connection
-                            def result = sshCommand remote: remote, command: "echo 'Hello from VM! Current directory: $(pwd)' && ls -la /home/vagrant"
-                            echo "SSH Command Output: ${result}"
-                            echo "Simple SSH command succeeded."
-                        } catch (Exception e) {
-                            echo "ERROR: Simple SSH command failed: ${e.getMessage()}"
-                            echo "Full stack trace (check Jenkins console for more details):"
-                            e.printStackTrace() // Print stack trace to console
-                            currentBuild.result = 'FAILURE' // Explicitly fail the build
-                            throw e // Re-throw to propagate the failure
-                        }
+                        // Use triple single quotes for the script to avoid Groovy interpolation issues with $
+                        // Use 'angular-app' as the service name, as defined in docker-compose.yml
+                        sshScript remote: remote, script: '''
+                            mkdir -p ''' + env.REMOTE_APP_DIR + '''/''' + env.TARGET_ENV + '''
+                        '''
+
+                        // Transfer docker-compose.yml
+                        sshPut remote: remote, from: "${env.DOCKER_COMPOSE_FILE}", into: "${env.REMOTE_APP_DIR}/${env.TARGET_ENV}/${env.DOCKER_COMPOSE_FILE}"
+                        // Transfer nginx-env.conf
+                        sshPut remote: remote, from: "nginx-${env.TARGET_ENV}.conf", into: "${env.REMOTE_APP_DIR}/${env.TARGET_ENV}/nginx-${env.TARGET_ENV}.conf"
+
+                        // Execute deployment commands on VM using triple single quotes
+                        sshScript remote: remote, script: '''
+                            cd ''' + env.REMOTE_APP_DIR + '''/''' + env.TARGET_ENV + '''
+                            echo "Pulling latest Docker image..."
+                            # The service name inside docker-compose.yml is 'angular-app'
+                            docker-compose -f ''' + env.DOCKER_COMPOSE_FILE + ''' pull angular-app || true
+                            echo "Stopping existing container (if any)..."
+                            docker-compose -f ''' + env.DOCKER_COMPOSE_FILE + ''' down || true
+                            echo "Starting new container..."
+                            docker-compose -f ''' + env.DOCKER_COMPOSE_FILE + ''' up -d
+                            echo "Successfully deployed ''' + env.APP_NAME + ''' to ''' + env.TARGET_ENV + ''' environment on VM."
+                        '''
                     }
                 }
             }
