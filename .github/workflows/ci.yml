@@ -58,5 +58,5 @@ jobs:
           context: .
           push: true
           tags: |
-            ${{ secrets.DOCKER_USERNAME }}/my-angular-app:${{ env.IMAGE_TAG }}
-            ${{ secrets.DOCKER_USERNAME }}/my-angular-app:${{ github.sha }}
+            ${{ secrets.DOCKER_USERNAME }}/test-deploy-angular:${{ env.IMAGE_TAG }}
+            ${{ secrets.DOCKER_USERNAME }}/test-deploy-angular:${{ github.sha }}
