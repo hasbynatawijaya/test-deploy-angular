@@ -1,62 +1,147 @@
-# .github/workflows/ci.yml
-name: Angular CI with Docker
+# .github/workflows/ci-cd.yml
+# This GitHub Actions workflow automates the Continuous Integration and Continuous Deployment process.
+# It builds the Angular app, creates a Docker image, pushes it to Docker Hub,
+# and then deploys it to a remote VM via SSH using Docker Compose.
 
+name: Angular CI/CD with Docker
+
+# Trigger the workflow on pushes to main, stage, and dev branches
 on:
   push:
     branches:
       - main
       - stage
       - dev
-  pull_request:
-    branches:
-      - main
-      - stage
-      - dev
 
 jobs:
-  build-and-push-docker:
-    runs-on: ubuntu-latest
+  build-and-deploy:
+    runs-on: ubuntu-latest # Use a GitHub-hosted runner with Ubuntu
+
+    env:
+      DOCKER_ORG_NAME: hasbynatawijaya # Replace with your Docker Hub username
+      APP_NAME: test-deploy-angular
+      VM_IP: 192.168.56.11 # Your Vagrant VM's IP address
+      VM_USER: vagrant # The SSH user on your Vagrant VM
+      REMOTE_APP_DIR: /home/vagrant/angular-app # Base directory on the VM
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v4 # Action to checkout your repository code
 
       - name: Set up Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v4 # Action to set up Node.js environment
         with:
-          node-version: '22'
+          node-version: '22' # Specify Node.js version
 
       - name: Install dependencies
-        run: npm install --legacy-peer-deps
+        run: npm install --legacy-peer-deps # Install Angular project dependencies
 
       - name: Build Angular app
-        run: npm run build -- --configuration production
+        run: npm run build -- --configuration production # Build the Angular app for production
 
-      - name: Determine Docker Image Tag
-        id: set_tag
+      - name: Determine Environment and Docker Tag
+        id: set_env_vars # Assign an ID to this step to reference its outputs
         run: |
+          # Determine the target environment and Docker image tag based on the branch name
           if [[ "${{ github.ref }}" == "refs/heads/main" ]]; then
-            echo "IMAGE_TAG=prod" >> $GITHUB_ENV
+            echo "TARGET_ENV=prod" >> $GITHUB_ENV
+            echo "DOCKER_IMAGE_TAG=prod" >> $GITHUB_ENV
+            echo "DOCKER_COMPOSE_FILE=docker-compose.prod.yml" >> $GITHUB_ENV
+            echo "CONTAINER_SERVICE_NAME=angular-app" >> $GITHUB_ENV # Service name in docker-compose.yml
           elif [[ "${{ github.ref }}" == "refs/heads/stage" ]]; then
-            echo "IMAGE_TAG=stage" >> $GITHUB_ENV
+            echo "TARGET_ENV=stage" >> $GITHUB_ENV
+            echo "DOCKER_IMAGE_TAG=stage" >> $GITHUB_ENV
+            echo "DOCKER_COMPOSE_FILE=docker-compose.stage.yml" >> $GITHUB_ENV
+            echo "CONTAINER_SERVICE_NAME=angular-app" >> $GITHUB_ENV
           elif [[ "${{ github.ref }}" == "refs/heads/dev" ]]; then
-            echo "IMAGE_TAG=dev" >> $GITHUB_ENV
+            echo "TARGET_ENV=dev" >> $GITHUB_ENV
+            echo "DOCKER_IMAGE_TAG=dev" >> $GITHUB_ENV
+            echo "DOCKER_COMPOSE_FILE=docker-compose.dev.yml" >> $GITHUB_ENV
+            echo "CONTAINER_SERVICE_NAME=angular-app" >> $GITHUB_ENV
           else
-            echo "IMAGE_TAG=${{ github.sha }}" >> $GITHUB_ENV
+            # For any other branch (e.g., feature branches), we might only build/test, not deploy.
+            # We'll set a 'feature' target environment and a unique image tag based on commit SHA.
+            echo "TARGET_ENV=feature" >> $GITHUB_ENV
+            echo "DOCKER_IMAGE_TAG=${{ github.sha }}" >> $GITHUB_ENV
+            echo "DOCKER_COMPOSE_FILE=" >> $GITHUB_ENV # No specific compose file for feature branches
+            echo "CONTAINER_SERVICE_NAME=" >> $GITHUB_ENV
+            echo "::notice::Detected feature branch: ${{ github.ref_name }}. Only building and pushing Docker image."
           fi
-          echo "Determined image tag: ${{ env.IMAGE_TAG }}"
+          echo "::debug::Target Environment: ${{ env.TARGET_ENV }}"
+          echo "::debug::Docker Image Tag: ${{ env.DOCKER_IMAGE_TAG }}"
+          echo "::debug::Docker Compose File: ${{ env.DOCKER_COMPOSE_FILE }}"
+          echo "::debug::Container Service Name: ${{ env.CONTAINER_SERVICE_NAME }}"
 
       - name: Log in to Docker Hub
-        uses: docker/login-action@v3
+        uses: docker/login-action@v3 # Action to log in to Docker Hub
         with:
-          username: ${{ secrets.DOCKER_USERNAME }}
-          password: ${{ secrets.DOCKER_PASSWORD }}
+          username: ${{ secrets.DOCKER_USERNAME }} # Docker Hub username from GitHub Secrets
+          password: ${{ secrets.DOCKER_PASSWORD }} # Docker Hub access token from GitHub Secrets
 
       - name: Build and push Docker image
-        uses: docker/build-push-action@v5
+        # This step runs for all branches, including feature branches
+        uses: docker/build-push-action@v5 # Action to build and push Docker images
         with:
-          context: .
-          push: true
+          context: . # Build context is the current directory
+          push: true # Push the image to the registry
           tags: |
-            ${{ secrets.DOCKER_USERNAME }}/test-deploy-angular:${{ env.IMAGE_TAG }}
-            ${{ secrets.DOCKER_USERNAME }}/test-deploy-angular:${{ github.sha }}
+            ${{ env.DOCKER_ORG_NAME }}/${{ env.APP_NAME }}:${{ env.DOCKER_IMAGE_TAG }} # Tag with environment-specific tag
+            ${{ env.DOCKER_ORG_NAME }}/${{ env.APP_NAME }}:${{ github.sha }} # Always tag with commit SHA for traceability
+            ${{ env.TARGET_ENV == 'prod' && format('{0}/{1}:latest', env.DOCKER_ORG_NAME, env.APP_NAME) || '' }}
+
+      - name: Deploy to VM via SSH
+        # This step only runs for dev, stage, and prod branches
+        if: env.TARGET_ENV != 'feature'
+        uses: appleboy/ssh-action@v1.0.0 # Action to execute SSH commands and transfer files
+        with:
+          host: ${{ env.VM_IP }}
+          username: ${{ env.VM_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }} # SSH private key from GitHub Secrets
+          script: |
+            # Create the target directory if it doesn't exist
+            mkdir -p ${{ env.REMOTE_APP_DIR }}/${{ env.TARGET_ENV }}
+            cd ${{ env.REMOTE_APP_DIR }}/${{ env.TARGET_ENV }}
+
+            # Transfer Docker Compose file and Nginx config
+            # Use SCP via the action's 'script' for simplicity, or 'scp' directly if preferred.
+            # For multiple files, 'scp' command is often cleaner within the script.
+            # The appleboy/ssh-action also has a 'source' and 'target' for file transfers,
+            # but for dynamic files like these, it's often easier to manage within the script.
+
+            # We need to ensure the files are available on the runner before transferring.
+            # Let's use a temporary directory for the files to be transferred.
+            # This is a common pattern when using appleboy/ssh-action for file transfers.
+            # Since the action runs on the runner, we can access the workspace.
+
+            # Example: Transferring files using 'scp' command within the script
+            # NOTE: This requires 'scp' to be available on the runner, which it generally is.
+            # It also requires the SSH key to be loaded into an SSH agent on the runner,
+            # which appleboy/ssh-action handles.
+
+            # Ensure the files are present in the runner's workspace for scp
+            # (They are from the checkout step)
+
+            # Transfer docker-compose.yml
+            scp -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+                ./${{ env.DOCKER_COMPOSE_FILE }} \
+                ${{ env.VM_USER }}@${{ env.VM_IP }}:${{ env.REMOTE_APP_DIR }}/${{ env.TARGET_ENV }}/${{ env.DOCKER_COMPOSE_FILE }}
+
+            # Transfer nginx-env.conf
+            scp -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+                ./nginx-${{ env.TARGET_ENV }}.conf \
+                ${{ env.VM_USER }}@${{ env.VM_IP }}:${{ env.REMOTE_APP_DIR }}/${{ env.TARGET_ENV }}/nginx-${{ env.TARGET_ENV }}/nginx-${{ env.TARGET_ENV }}.conf
+
+            # Navigate to the deployment directory on the VM
+            cd ${{ env.REMOTE_APP_DIR }}/${{ env.TARGET_ENV }}
+
+            echo "Pulling latest Docker image for ${{ env.TARGET_ENV }}..."
+            # The service name inside docker-compose.yml is 'angular-app'
+            docker-compose -f ${{ env.DOCKER_COMPOSE_FILE }} pull ${{ env.CONTAINER_SERVICE_NAME }} || true
+
+            echo "Stopping existing container (if any) for ${{ env.TARGET_ENV }}..."
+            docker-compose -f ${{ env.DOCKER_COMPOSE_FILE }} down || true
+
+            echo "Starting new container for ${{ env.TARGET_ENV }}..."
+            docker-compose -f ${{ env.DOCKER_COMPOSE_FILE }} up -d
+
+            echo "Successfully deployed ${{ env.APP_NAME }} to ${{ env.TARGET_ENV }} environment on VM."
