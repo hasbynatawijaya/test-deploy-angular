@@ -85,8 +85,8 @@ jobs:
           context: . # Build context is the current directory
           push: true # Push the image to the registry
           tags: |
-            ${{ env.DOCKER_ORG_NAME }}/${{ env.APP_NAME }}:${{ env.DOCKER_IMAGE_TAG }} # Tag with environment-specific tag
-            ${{ env.DOCKER_ORG_NAME }}/${{ env.APP_NAME }}:${{ github.sha }} # Always tag with commit SHA for traceability
+            ${{ env.DOCKER_ORG_NAME }}/${{ env.APP_NAME }}:${{ env.DOCKER_IMAGE_TAG }}
+            ${{ env.DOCKER_ORG_NAME }}/${{ env.APP_NAME }}:${{ github.sha }}
             ${{ env.TARGET_ENV == 'prod' && format('{0}/{1}:latest', env.DOCKER_ORG_NAME, env.APP_NAME) || '' }}
 
       - name: Deploy to VM via SSH
