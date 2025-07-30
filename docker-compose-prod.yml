@@ -1,0 +1,11 @@
+version: "3.8"
+
+services:
+  angular-app:
+    image: your_docker_username/test-deploy-app:prod # Tag for prod environment
+    container_name: test-deploy-prod
+    ports:
+      - "80:80" # Prod app on default port 80
+    volumes:
+      - ./nginx-prod.conf:/etc/nginx/conf.d/default.conf
+    restart: always
