@@ -60,8 +60,8 @@ pipeline {
             }
         }
         stage('Deploy to VM') {
-            when { expression { return env.TARGET_ENV != 'feature' } }
-            steps {
+             when { expression { return env.TARGET_ENV != 'feature' } }
+             steps {
                 script {
                     def remote = [:]
                     remote.name = env.VM_IP
@@ -69,31 +69,28 @@ pipeline {
                     remote.user = env.VM_USER
                     remote.allowAnyHosts = true // Set to true if you don't want to manage known_hosts on Jenkins
 
+                    echo "Attempting SSH connection using credential ID: ${env.VM_SSH_CREDENTIAL_ID}"
+
                     withCredentials([sshUserPrivateKey(credentialsId: env.VM_SSH_CREDENTIAL_ID, keyFileVariable: 'identityFile', usernameVariable: 'userName')]) {
+                        // Add debug print to see if identityFile is populated
+                        echo "Resolved identityFile path: ${identityFile}"
+
                         remote.identityFile = identityFile
                         remote.user = userName
 
-                        // Create directory and transfer docker-compose & nginx config
-                        sshScript remote: remote, script: """
-                            mkdir -p ${env.REMOTE_APP_DIR}/${env.TARGET_ENV}
-                        """
-
-                        // Transfer docker-compose.yml
-                        sshPut remote: remote, from: "${env.DOCKER_COMPOSE_FILE}", into: "${env.REMOTE_APP_DIR}/${env.TARGET_ENV}/${env.DOCKER_COMPOSE_FILE}"
-                        // Transfer nginx-env.conf
-                        sshPut remote: remote, from: "nginx-${env.TARGET_ENV}.conf", into: "${env.REMOTE_APP_DIR}/${env.TARGET_ENV}/nginx-${env.TARGET_ENV}.conf"
-
-                        // Execute deployment commands on VM
-                        sshScript remote: remote, script: """
-                            cd ${env.REMOTE_APP_DIR}/${env.TARGET_ENV}
-                            echo "Pulling latest Docker image..."
-                            docker-compose -f ${env.DOCKER_COMPOSE_FILE} pull ${env.CONTAINER_NAME} || true # Use CONTAINER_NAME as service name if you named them uniquely
-                            echo "Stopping existing container (if any)..."
-                            docker-compose -f ${env.DOCKER_COMPOSE_FILE} down || true
-                            echo "Starting new container..."
-                            docker-compose -f ${env.DOCKER_COMPOSE_FILE} up -d
-                            echo "Successfully deployed ${env.APP_NAME} to ${env.TARGET_ENV} environment on VM."
-                        """
+                        echo "Attempting simple SSH command to ${remote.host} as ${remote.user}"
+                        try {
+                            // Execute a very simple command to test the connection
+                            def result = sshCommand remote: remote, command: "echo 'Hello from VM! Current directory: $(pwd)' && ls -la /home/vagrant"
+                            echo "SSH Command Output: ${result}"
+                            echo "Simple SSH command succeeded."
+                        } catch (Exception e) {
+                            echo "ERROR: Simple SSH command failed: ${e.getMessage()}"
+                            echo "Full stack trace (check Jenkins console for more details):"
+                            e.printStackTrace() // Print stack trace to console
+                            currentBuild.result = 'FAILURE' // Explicitly fail the build
+                            throw e // Re-throw to propagate the failure
+                        }
                     }
                 }
             }
