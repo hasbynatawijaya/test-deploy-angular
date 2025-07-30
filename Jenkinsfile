@@ -1,10 +1,10 @@
 // Jenkinsfile
 pipeline {
     agent any
-    tools { nodejs 'NodeJS 18' }
+    tools { nodejs 'NodeJS 22' }
     environment {
         DOCKER_ORG_NAME = "hasbynatawijaya" // Replace with your Docker Hub username
-        APP_NAME = "my-angular-app"
+        APP_NAME = "test-deploy-angular"
         DOCKER_REGISTRY = "docker.io"
         TARGET_ENV = ""
         DOCKER_IMAGE_TAG = ""
